@@ -1,0 +1,1342 @@
+EMU8086 GENERATED LISTING. MACHINE CODE <- SOURCE.
+ 
+kernel.bin -- emu8086 assembler version: 4.08  
+ 
+[ 3.01.2024  --  22:58:49 ] 
+ 
+===================================================================================================
+[LINE]     LOC: MACHINE CODE                          SOURCE
+===================================================================================================
+ 
+[   1]        :                                       name "kernel"
+[   2]        :                                       ; this is a very basic example
+[   3]        :                                       ; of a tiny operating system.
+[   4]        :                                       ;
+[   5]        :                                       ; this is kernel module!
+[   6]        :                                       ;
+[   7]        :                                       ; it is assumed that this machine
+[   8]        :                                       ; code is loaded by 'micro-os_loader.asm'
+[   9]        :                                       ; from floppy drive from:
+[  10]        :                                       ;   cylinder: 0
+[  11]        :                                       ;   sector: 2
+[  12]        :                                       ;   head: 0
+[  13]        :                                       
+[  14]        :                                       
+[  15]        :                                       ;=================================================
+[  16]        :                                       ; how to test micro-operating system:
+[  17]        :                                       ;   1. compile micro-os_loader.asm
+[  18]        :                                       ;   2. compile micro-os_kernel.asm
+[  19]        :                                       ;   3. compile writebin.asm
+[  20]        :                                       ;   4. insert empty floppy disk to drive a:
+[  21]        :                                       ;   5. from command prompt type:
+[  22]        :                                       ;        writebin loader.bin
+[  23]        :                                       ;        writebin kernel.bin /k
+[  24]        :                                       ;=================================================
+[  25]        :                                       
+[  26]        :                                       ; directive to create bin file:
+[  27]        :                                       #make_bin#
+[  28]        :                                       
+[  29]        :                                       ; where to load? (for emulator. all these values are saved into .binf file)
+[  30]        :                                       #load_segment=0800#
+[  31]        :                                       #load_offset=0000#
+[  32]        :                                       
+[  33]        :                                       ; these values are set to registers on load, actually only ds, es, cs, ip, ss, sp are
+[  34]        :                                       ; important. these values are used for the emulator to emulate real microprocessor state
+[  35]        :                                       ; after micro-os_loader transfers control to this kernel (as expected).
+[  36]        :                                       #al=0b#
+[  37]        :                                       #ah=00#
+[  38]        :                                       #bh=00#
+[  39]        :                                       #bl=00#
+[  40]        :                                       #ch=00#
+[  41]        :                                       #cl=02#
+[  42]        :                                       #dh=00#
+[  43]        :                                       #dl=00#
+[  44]        :                                       #ds=0800#
+[  45]        :                                       #es=0800#
+[  46]        :                                       #si=7c02#
+[  47]        :                                       #di=0000#
+[  48]        :                                       #bp=0000#
+[  49]        :                                       #cs=0800#
+[  50]        :                                       #ip=0000#
+[  51]        :                                       #ss=07c0#
+[  52]        :                                       #sp=03fe#
+[  53]        :                                       
+[  54]        :                                       
+[  55]        :                                       
+[  56]        :                                       ; this macro prints a char in al and advances
+[  57]        :                                       ; the current cursor position:
+[  58]        :                                       putc    macro   char
+[  59]        :                                       push    ax
+[  60]        :                                       mov     al, char
+[  61]        :                                       mov     ah, 0eh
+[  62]        :                                       int     10h
+[  63]        :                                       pop     ax
+[  64]        :                                       endm
+[  65]        :                                       
+[  66]        :                                       
+[  67]        :                                       ; sets current cursor position:
+[  68]        :                                       gotoxy  macro   col, row
+[  69]        :                                       push    ax
+[  70]        :                                       push    bx
+[  71]        :                                       push    dx
+[  72]        :                                       mov     ah, 02h
+[  73]        :                                       mov     dh, row
+[  74]        :                                       mov     dl, col
+[  75]        :                                       mov     bh, 0
+[  76]        :                                       int     10h
+[  77]        :                                       pop     dx
+[  78]        :                                       pop     bx
+[  79]        :                                       pop     ax
+[  80]        :                                       endm
+[  81]        :                                       
+[  82]        :                                       
+[  83]        :                                       print macro x, y, attrib, sdat
+[  84]        :                                       LOCAL   s_dcl, skip_dcl, s_dcl_end
+[  85]        :                                       pusha
+[  86]        :                                       mov dx, cs
+[  87]        :                                       mov es, dx
+[  88]        :                                       mov ah, 13h
+[  89]        :                                       mov al, 1
+[  90]        :                                       mov bh, 0
+[  91]        :                                       mov bl, attrib
+[  92]        :                                       mov cx, offset s_dcl_end - offset s_dcl
+[  93]        :                                       mov dl, x
+[  94]        :                                       mov dh, y
+[  95]        :                                       mov bp, offset s_dcl
+[  96]        :                                       int 10h
+[  97]        :                                       popa
+[  98]        :                                       jmp skip_dcl
+[  99]        :                                       s_dcl DB sdat
+[ 100]        :                                       s_dcl_end DB 0
+[ 101]        :                                       skip_dcl:
+[ 102]        :                                       endm
+[ 103]        :                                       
+[ 104]        :                                       
+[ 105]        :                                       
+[ 106]        :                                       ; kernel is loaded at 0800:0000 by micro-os_loader
+[ 107]        :                                       org 0000h
+[ 108]        :                                       
+[ 109]        :                                       ; skip the data and function delaration section:
+[ 110]    0000: E9 75 02                              jmp start
+[ 111]        :                                       ; The first byte of this jump instruction is 0E9h
+[ 112]        :                                       ; It is used by to determine if we had a sucessful launch or not.
+[ 113]        :                                       ; The loader prints out an error message if kernel not found.
+[ 114]        :                                       ; The kernel prints out "F" if it is written to sector 1 instead of sector 2.
+[ 115]        :                                       
+[ 116]        :                                       
+[ 117]        :                                       
+[ 118]        :                                       
+[ 119]        :                                       ;==== data section =====================
+[ 120]        :                                       
+[ 121]        :                                       ; welcome message:
+[ 122]    0003: 54 55 52 4B 2D 4F 53 27 41 20 48 4F   msg  db "TURK-OS'A HO",158," GELD",152,"N",152,"Z!! Liste i",135,"in 'help' yaz",141,"n",141,"z.", 0
+                9E 20 47 45 4C 44 98 4E 98 5A 21 21 
+                20 4C 69 73 74 65 20 69 87 69 6E 20 
+                27 68 65 6C 70 27 20 79 61 7A 8D 6E 
+                8D 7A 2E 00                         
+[ 123]        :                                       
+[ 124]        :                                       
+[ 125]        :                                       cmd_size        equ 40    ; size of command_buffer
+[ 126]    0037: 62 62 62 62 62 62 62 62 62 62 62 62   command_buffer  db cmd_size dup("b")
+                62 62 62 62 62 62 62 62 62 62 62 62 
+                62 62 62 62 62 62 62 62 62 62 62 62 
+                62 62 62 62                         
+[ 127]    005F: 20 20 20 20 20 20 20 20 20 20 20 20   clean_str       db cmd_size dup(" "), 0
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 00                      
+[ 128]    0088: 3E 00                                 prompt          db  ">", 0
+[ 129]        :                                       
+[ 130]        :                                       
+[ 131]        :                                       ; commands:
+[ 132]    008A: 68 65 6C 70 00                        chelp    db "help", 0
+[ 133]    008F:                                       chelp_tail:
+[ 134]    008F: 63 6C 73 00                           ccls     db "cls", 0
+[ 135]    0093:                                       ccls_tail:
+[ 136]    0093: 64 72 61 77 00                        cdraw  db "draw", 0
+[ 137]    0098:                                       cdraw_tail:
+[ 138]    0098: 66 61 63 74 6F 72 69 61 6C 00         cfactorial  db "factorial", 0
+[ 139]    00A2:                                       cfactorial_tail:
+[ 140]    00A2: 70 72 65 70 61 72 65 64 20 62 79 00   cprep  db "prepared by", 0
+                                                    
+[ 141]    00AE:                                       cprep_tail:
+[ 142]    00AE: 71 75 69 74 00                        cquit    db "quit", 0
+[ 143]    00B3:                                       cquit_tail:
+[ 144]    00B3: 65 78 69 74 00                        cexit    db "exit", 0
+[ 145]    00B8:                                       cexit_tail:
+[ 146]    00B8: 72 65 62 6F 6F 74 00                  creboot  db "reboot", 0
+[ 147]    00BF:                                       creboot_tail:
+[ 148]        :                                       
+[ 149]        :                                       
+[ 150]    00BF: 54 9A 72 6B 2D 6F 73 27 75 20 73 65   help_msg db "T",154,"rk-os'",117," se",135,"ti",167,"iniz i",135,"in te",159,"ekk",154,"r ederiz!", 0Dh,0Ah
+                87 74 69 A7 69 6E 69 7A 20 69 87 69 
+                6E 20 74 65 9F 65 6B 6B 9A 72 20 65 
+                64 65 72 69 7A 21 0D 0A             
+[ 151]    00EB: 44 65 73 74 65 6B 6C 65 6E 65 6E 20   db "Desteklenen komutlar",141,"n listesi:", 0Dh,0Ah
+                6B 6F 6D 75 74 6C 61 72 8D 6E 20 6C 
+                69 73 74 65 73 69 3A 0D 0A          
+[ 152]    010C: 20 20 20 20 20 20 20 20 20 20 20 20   db "               ", 0Dh,0Ah
+                20 20 20 0D 0A                      
+[ 153]    011D: 68 65 6C 70 20 20 20 20 20 20 20 20   db "help             - Bu listeyi yazd",141,"r.", 0Dh,0Ah
+                20 20 20 20 20 2D 20 42 75 20 6C 69 
+                73 74 65 79 69 20 79 61 7A 64 8D 72 
+                2E 0D 0A                            
+[ 154]    0144: 63 6C 73 20 20 20 20 20 20 20 20 20   db "cls              - Ekran",141," temizleme.", 0Dh,0Ah
+                20 20 20 20 20 2D 20 45 6B 72 61 6E 
+                8D 20 74 65 6D 69 7A 6C 65 6D 65 2E 
+                0D 0A                               
+[ 155]    016A: 64 72 61 77 20 20 20 20 20 20 20 20   db "draw             - ",128,"izim yapma." , 0Dh,0Ah
+                20 20 20 20 20 2D 20 80 69 7A 69 6D 
+                20 79 61 70 6D 61 2E 0D 0A          
+[ 156]    018B: 66 61 63 74 6F 72 69 61 6C 20 20 20   db "factorial        - Faktoriyel alma.", 0Dh,0Ah
+                20 20 20 20 20 2D 20 46 61 6B 74 6F 
+                72 69 79 65 6C 20 61 6C 6D 61 2E 0D 
+                0A                                  
+[ 157]    01B0: 70 72 65 70 61 72 65 64 20 62 79 20   db "prepared by      - Projeyi haz",141,"rlayanlar.", 0Dh,0Ah
+                20 20 20 20 20 2D 20 50 72 6F 6A 65 
+                79 69 20 68 61 7A 8D 72 6C 61 79 61 
+                6E 6C 61 72 2E 0D 0A                
+[ 158]    01DB: 72 65 62 6F 6F 74 20 20 20 20 20 20   db "reboot           - Makineyi yeniden ba",159,"lat.", 0Dh,0Ah
+                20 20 20 20 20 2D 20 4D 61 6B 69 6E 
+                65 79 69 20 79 65 6E 69 64 65 6E 20 
+                62 61 9F 6C 61 74 2E 0D 0A          
+[ 159]    0208: 71 75 69 74 20 20 20 20 20 20 20 20   db "quit             - Reboot ile ayn",141,".", 0Dh,0Ah
+                20 20 20 20 20 2D 20 52 65 62 6F 6F 
+                74 20 69 6C 65 20 61 79 6E 8D 2E 0D 
+                0A                                  
+[ 160]    022D: 65 78 69 74 20 20 20 20 20 20 20 20   db "exit             - Quit ile ayn",141,".", 0Dh,0Ah
+                20 20 20 20 20 2D 20 51 75 69 74 20 
+                69 6C 65 20 61 79 6E 8D 2E 0D 0A    
+[ 161]    0250: 66 61 72 6B 6C 8D 20 6B 6F 6D 75 74   db "farkl",141," komutlar gelecek", 0Dh,0Ah, 0
+                6C 61 72 20 67 65 6C 65 63 65 6B 0D 
+                0A 00                               
+[ 162]        :                                       
+[ 163]    026A: 59 61 6E 6C 8D 9F 20 4B 6F 6D 75 74   unknown  db "Yanl",141,"",159," Komut " , 0
+                20 00                               
+[ 164]        :                                       
+[ 165]        :                                       ;======================================
+[ 166]        :                                       
+[ 167]    0278:                                       start:
+[ 168]        :                                       
+[ 169]        :                                       ; set data segment:
+[ 170]    0278: 0E                                    push    cs
+[ 171]    0279: 1F                                    pop     ds
+[ 172]        :                                       
+[ 173]        :                                       
+[ 174]        :                                       ; set default video mode 80x25:
+[ 175]    027A: B4 00                                 mov     ah, 00h
+[ 176]    027C: B0 03                                 mov     al, 03h
+[ 177]    027E: CD 10                                 int     10h
+[ 178]        :                                       
+[ 179]        :                                       ; blinking disabled for compatibility with dos/bios,
+[ 180]        :                                       ; emulator and windows prompt never blink.
+[ 181]    0280: B8 03 10                              mov     ax, 1003h
+[ 182]    0283: BB 00 00                              mov     bx, 0      ; disable blinking.
+[ 183]    0286: CD 10                                 int     10h
+[ 184]        :                                       
+[ 185]        :                                       
+[ 186]        :                                       ; *** the integrity check  ***
+[ 187]    0288: 80 3E 00 00 E9                        cmp [0000], 0E9h
+[ 188]    028D: 74 1B                                 jz integrity_check_ok
+[ 189]    028F:                                       integrity_failed:
+[ 190]    028F: B0 46                                 mov     al, 'F'
+[ 191]    0291: B4 0E                                 mov     ah, 0eh
+[ 192]    0293: CD 10                                 int     10h
+[ 193]        :                                       ; wait for any key...
+[ 194]    0295: B8 00 00                              mov     ax, 0
+[ 195]    0298: CD 16                                 int     16h
+[ 196]        :                                       ; reboot...
+[ 197]    029A: B8 40 00                              mov     ax, 0040h
+[ 198]    029D: 8E D8                                 mov     ds, ax
+[ 199]    029F: C7 06 72 00 00 00                     mov     w.[0072h], 0000h
+[ 200]    02A5: EA 00 00 FF FF                        jmp	0ffffh:0000h	
+[ 201]    02AA:                                       integrity_check_ok:
+[ 202]    02AA: 90                                    nop
+[ 203]        :                                       ; *** ok ***
+[ 204]        :                                       
+[ 205]        :                                       
+[ 206]        :                                       
+[ 207]        :                                       ; clear screen:
+[ 208]    02AB: E8 CB 0B                              call    clear_screen
+[ 209]        :                                       
+[ 210]        :                                       
+[ 211]        :                                       ; print out the message:
+[ 212]    02AE: BE 03 00                              lea     si, msg
+[ 213]    02B1: E8 B3 0B                              call    print_string
+[ 214]        :                                       
+[ 215]        :                                       
+[ 216]    02B4:                                       eternal_loop:
+[ 217]    02B4: E8 05 00                              call    get_command
+[ 218]        :                                       
+[ 219]    02B7: E8 41 00                              call    process_cmd
+[ 220]        :                                       
+[ 221]        :                                       ; make eternal loop:
+[ 222]    02BA: EB F8                                 jmp eternal_loop
+[ 223]        :                                       
+[ 224]        :                                       
+[ 225]        :                                       ;===========================================
+[ 226]    02BC:                                       get_command proc near
+[ 227]        :                                       
+[ 228]        :                                       ; set cursor position to bottom
+[ 229]        :                                       ; of the screen:
+[ 230]    02BC: B8 40 00                              mov     ax, 40h
+[ 231]    02BF: 8E C0                                 mov     es, ax
+[ 232]    02C1: 26 A0 84 00                           mov     al, es:[84h]
+[ 233]        :                                       
+[ 234]    02C5: 50 53 52 B4 02 8A F0 B2 00 B7 00 CD   gotoxy  0, al
+                10 5A 5B 58                         
+[ 235]        :                                       
+[ 236]        :                                       ; clear command line:
+[ 237]    02D5: BE 5F 00                              lea     si, clean_str
+[ 238]    02D8: E8 8C 0B                              call    print_string
+[ 239]        :                                       
+[ 240]    02DB: 50 53 52 B4 02 8A F0 B2 00 B7 00 CD   gotoxy  0, al
+                10 5A 5B 58                         
+[ 241]        :                                       
+[ 242]        :                                       ; show prompt:
+[ 243]    02EB: BE 88 00                              lea     si, prompt
+[ 244]    02EE: E8 76 0B                              call    print_string
+[ 245]        :                                       
+[ 246]        :                                       
+[ 247]        :                                       ; wait for a command:
+[ 248]    02F1: BA 28 00                              mov     dx, cmd_size    ; buffer size.
+[ 249]    02F4: BF 37 00                              lea     di, command_buffer
+[ 250]    02F7: E8 20 0B                              call    get_string
+[ 251]        :                                       
+[ 252]        :                                       
+[ 253]    02FA: C3                                    ret
+[ 254]        :                                       get_command endp
+[ 255]        :                                       ;===========================================
+[ 256]        :                                       
+[ 257]    02FB:                                       process_cmd proc    near
+[ 258]        :                                       
+[ 259]        :                                       ;//// check commands here ///
+[ 260]        :                                       ; set es to ds
+[ 261]    02FB: 1E                                    push    ds
+[ 262]    02FC: 07                                    pop     es
+[ 263]        :                                       
+[ 264]    02FD: FC                                    cld     ; forward compare.
+[ 265]        :                                       
+[ 266]        :                                       ; compare command buffer with 'help'
+[ 267]    02FE: BE 37 00                              lea     si, command_buffer
+[ 268]    0301: B9 05 00                              mov     cx, chelp_tail - offset chelp   ; size of ['help',0] string.
+[ 269]    0304: BF 8A 00                              lea     di, chelp
+[ 270]    0307: F3 A6                                 repe    cmpsb
+[ 271]    0309: 75 03 E9 AE 00                        je      help_command
+[ 272]        :                                       
+[ 273]        :                                       ; compare command buffer with 'cls'
+[ 274]    030E: BE 37 00                              lea     si, command_buffer
+[ 275]    0311: B9 04 00                              mov     cx, ccls_tail - offset ccls  ; size of ['cls',0] string.
+[ 276]    0314: BF 8F 00                              lea     di, ccls
+[ 277]    0317: F3 A6                                 repe    cmpsb
+[ 278]    0319: 75 03                                 jne     not_cls
+[ 279]    031B: E9 CF 00                              jmp     cls_command
+[ 280]    031E:                                       not_cls:
+[ 281]        :                                       
+[ 282]        :                                       ; compare command buffer with 'draw'
+[ 283]    031E: BE 37 00                              lea     si, command_buffer
+[ 284]    0321: B9 05 00                              mov     cx, cdraw_tail - offset cdraw   ; size of ['draw,0] string.
+[ 285]    0324: BF 93 00                              lea     di, cdraw
+[ 286]    0327: F3 A6                                 repe    cmpsb
+[ 287]    0329: 75 03 E9 C5 00                        je      draw_command
+[ 288]        :                                       
+[ 289]        :                                       ; compare command buffer with 'factorial'
+[ 290]    032E: BE 37 00                              lea     si, command_buffer
+[ 291]    0331: B9 0A 00                              mov     cx, cfactorial_tail - offset cfactorial   ; size of ['factorial',0] string.
+[ 292]    0334: BF 98 00                              lea     di, cfactorial
+[ 293]    0337: F3 A6                                 repe    cmpsb
+[ 294]    0339: 75 03 E9 6D 0B                        je      factorial_command
+[ 295]        :                                       
+[ 296]        :                                       ; compare command buffer with 'prepared by'
+[ 297]    033E: BE 37 00                              lea     si, command_buffer
+[ 298]    0341: B9 0C 00                              mov     cx, cprep_tail - offset cprep   ; size of ['prepared by',0] string.
+[ 299]    0344: BF A2 00                              lea     di, cprep
+[ 300]    0347: F3 A6                                 repe    cmpsb
+[ 301]    0349: 75 03 E9 76 0D                        je      prep_command
+[ 302]        :                                       
+[ 303]        :                                       
+[ 304]        :                                       ; compare command buffer with 'quit'
+[ 305]    034E: BE 37 00                              lea     si, command_buffer
+[ 306]    0351: B9 05 00                              mov     cx, cquit_tail - offset cquit ; size of ['quit',0] string.
+[ 307]    0354: BF AE 00                              lea     di, cquit
+[ 308]    0357: F3 A6                                 repe    cmpsb
+[ 309]    0359: 75 03 E9 F1 09                        je      reboot_command
+[ 310]        :                                       
+[ 311]        :                                       ; compare command buffer with 'exit'
+[ 312]    035E: BE 37 00                              lea     si, command_buffer
+[ 313]    0361: B9 05 00                              mov     cx, cexit_tail - offset cexit ; size of ['exit',0] string.
+[ 314]    0364: BF B3 00                              lea     di, cexit
+[ 315]    0367: F3 A6                                 repe    cmpsb
+[ 316]    0369: 75 03 E9 E1 09                        je      reboot_command
+[ 317]        :                                       
+[ 318]        :                                       ; compare command buffer with 'reboot'
+[ 319]    036E: BE 37 00                              lea     si, command_buffer
+[ 320]    0371: B9 07 00                              mov     cx, creboot_tail - offset creboot  ; size of ['reboot',0] string.
+[ 321]    0374: BF B8 00                              lea     di, creboot
+[ 322]    0377: F3 A6                                 repe    cmpsb
+[ 323]    0379: 75 03 E9 D1 09                        je      reboot_command
+[ 324]        :                                       
+[ 325]        :                                       ; ignore empty lines
+[ 326]    037E: 80 3E 37 00 00                        cmp     command_buffer, 0
+[ 327]    0383: 75 03 E9 71 0A                        jz      processed
+[ 328]        :                                       
+[ 329]        :                                       
+[ 330]        :                                       ;////////////////////////////
+[ 331]        :                                       
+[ 332]        :                                       ; if gets here, then command is
+[ 333]        :                                       ; unknown...
+[ 334]        :                                       
+[ 335]    0388: B0 01                                 mov     al, 1
+[ 336]    038A: E8 6D 0A                              call    scroll_t_area
+[ 337]        :                                       
+[ 338]        :                                       ; set cursor position just
+[ 339]        :                                       ; above prompt line:
+[ 340]    038D: B8 40 00                              mov     ax, 40h
+[ 341]    0390: 8E C0                                 mov     es, ax
+[ 342]    0392: 26 A0 84 00                           mov     al, es:[84h]
+[ 343]    0396: FE C8                                 dec     al
+[ 344]    0398: 50 53 52 B4 02 8A F0 B2 00 B7 00 CD   gotoxy  0, al
+                10 5A 5B 58                         
+[ 345]        :                                       
+[ 346]    03A8: BE 6A 02                              lea     si, unknown
+[ 347]    03AB: E8 B9 0A                              call    print_string
+[ 348]        :                                       
+[ 349]    03AE: BE 37 00                              lea     si, command_buffer
+[ 350]    03B1: E8 B3 0A                              call    print_string
+[ 351]        :                                       
+[ 352]    03B4: B0 01                                 mov     al, 1
+[ 353]    03B6: E8 41 0A                              call    scroll_t_area
+[ 354]        :                                       
+[ 355]    03B9: E9 3D 0A                              jmp     processed
+[ 356]        :                                       
+[ 357]        :                                       ; +++++ 'help' command ++++++
+[ 358]    03BC:                                       help_command:
+[ 359]    03BC: E8 BA 0A                              call clear_screen
+[ 360]        :                                       
+[ 361]        :                                       ; scroll text area 9 lines up:
+[ 362]    03BF: B0 09                                 mov     al, 9
+[ 363]    03C1: E8 36 0A                              call    scroll_t_area
+[ 364]        :                                       
+[ 365]        :                                       ; set cursor position 9 lines
+[ 366]        :                                       ; above prompt line:
+[ 367]    03C4: B8 40 00                              mov     ax, 40h
+[ 368]    03C7: 8E C0                                 mov     es, ax
+[ 369]    03C9: 26 A0 84 00                           mov     al, es:[84h]
+[ 370]    03CD: 2C 0B                                 sub     al, 11
+[ 371]    03CF: 50 53 52 B4 02 8A F0 B2 00 B7 00 CD   gotoxy  0, al
+                10 5A 5B 58                         
+[ 372]        :                                       
+[ 373]    03DF: BE BF 00                              lea     si, help_msg
+[ 374]    03E2: E8 82 0A                              call    print_string
+[ 375]        :                                       
+[ 376]    03E5: B0 01                                 mov     al, 1
+[ 377]    03E7: E8 10 0A                              call    scroll_t_area
+[ 378]        :                                       
+[ 379]    03EA: E9 0C 0A                              jmp     processed
+[ 380]        :                                       
+[ 381]        :                                       
+[ 382]        :                                       
+[ 383]        :                                       
+[ 384]        :                                       ; +++++ 'cls' command ++++++
+[ 385]    03ED:                                       cls_command:
+[ 386]    03ED: E8 89 0A                              call    clear_screen
+[ 387]    03F0: E9 06 0A                              jmp     processed
+[ 388]        :                                       
+[ 389]        :                                       
+[ 390]        :                                       ; +++++ 'draw' command ++++++
+[ 391]        :                                       
+[ 392]    03F3:                                       draw_command proc near
+[ 393]        :                                       
+[ 394]    03F3: E8 83 0A                              call clear_screen
+[ 395]        :                                       
+[ 396]    03F6: 50 53 52 B4 02 B6 01 B2 03 B7 00 CD   gotoxy 3, 1
+                10 5A 5B 58                         
+[ 397]    0406: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 1, 0000_1111b,"                                             "
+                0F B9 2D 00 B2 03 B6 01 BD 22 04 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 00                               
+[ 398]    0450: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 2, 0000_1111b,"                                :::          "
+                0F B9 2D 00 B2 03 B6 02 BD 6C 04 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                3A 3A 3A 20 20 20 20 20 20 20 20 20 
+                20 00                               
+[ 399]    049A: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 3, 0000_1111b,"                      :::::::    :::::       "
+                0F B9 2D 00 B2 03 B6 03 BD B6 04 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 3A 3A 3A 3A 3A 3A 3A 20 20 20 
+                20 3A 3A 3A 3A 3A 20 20 20 20 20 20 
+                20 00                               
+[ 400]    04E4: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 4, 0000_1111b,"                 ::::::::::::::::::::::      "
+                0F B9 2D 00 B2 03 B6 04 BD 00 05 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 20 20 20 20 20 
+                20 00                               
+[ 401]    052E: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 5, 0000_1111b,"               ::::::::::::::::::::::::::    "
+                0F B9 2D 00 B2 03 B6 05 BD 4A 05 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 20 20 20 
+                20 00                               
+[ 402]    0578: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 6, 0000_1111b,"              :::::::::::::::::::::::::::    "
+                0F B9 2D 00 B2 03 B6 06 BD 94 05 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 20 20 20 
+                20 00                               
+[ 403]    05C2: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 7, 0000_1111b,"                ::::::::::::::::::::::::::   "
+                0F B9 2D 00 B2 03 B6 07 BD DE 05 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 20 
+                20 00                               
+[ 404]    060C: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 8, 0000_1111b,"                  :::::::::::::::::::::::::  "
+                0F B9 2D 00 B2 03 B6 08 BD 28 06 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 
+                20 00                               
+[ 405]    0656: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3,  9,0000_1111b,"                   ::::::::::::::::::::::::  "
+                0F B9 2D 00 B2 03 B6 09 BD 72 06 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 
+                20 00                               
+[ 406]    06A0: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 10,0000_1111b,"                    :::::::::::::::::::::::  "
+                0F B9 2D 00 B2 03 B6 0A BD BC 06 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 
+                20 00                               
+[ 407]    06EA: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 11,0000_1111b,"                      :::::::::::::::::::::  "
+                0F B9 2D 00 B2 03 B6 0B BD 06 07 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 
+                20 00                               
+[ 408]    0734: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 12,0000_1111b,"                             ::::::::::::::  "
+                0F B9 2D 00 B2 03 B6 0C BD 50 07 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 
+                20 00                               
+[ 409]    077E: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 13,0000_1111b,"                       ::     ::::::    :::  "
+                0F B9 2D 00 B2 03 B6 0D BD 9A 07 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 3A 3A 20 20 20 20 20 3A 3A 
+                3A 3A 3A 3A 20 20 20 20 3A 3A 3A 20 
+                20 00                               
+[ 410]    07C8: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 14,0000_1111b,"                :      ::: :  :::::    ::::  "
+                0F B9 2D 00 B2 03 B6 0E BD E4 07 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 3A 20 20 20 
+                20 20 20 3A 3A 3A 20 3A 20 20 3A 3A 
+                3A 3A 3A 20 20 20 20 3A 3A 3A 3A 20 
+                20 00                               
+[ 411]    0812: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 15,0000_1111b,"  :             ::::::::::::   ::::::::::::  "
+                0F B9 2D 00 B2 03 B6 0F BD 2E 08 CD 
+                10 61 EB 2E 20 20 3A 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 20 20 20 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 
+                20 00                               
+[ 412]    085C: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 16,0000_1111b,"  :              ::::::::::::  ::::::::::::  "
+                0F B9 2D 00 B2 03 B6 10 BD 78 08 CD 
+                10 61 EB 2E 20 20 3A 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 20 20 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 
+                20 00                               
+[ 413]    08A6: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 17,0000_1111b,"   ::              :::::::::    :::::::::::  "
+                0F B9 2D 00 B2 03 B6 11 BD C2 08 CD 
+                10 61 EB 2E 20 20 20 3A 3A 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 20 20 20 20 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 
+                20 00                               
+[ 414]    08F0: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 18,0000_1111b,"    ::              :::::::  : ::::::::::::  "
+                0F B9 2D 00 B2 03 B6 12 BD 0C 09 CD 
+                10 61 EB 2E 20 20 20 20 3A 3A 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                3A 3A 3A 3A 3A 3A 3A 20 20 3A 20 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 
+                20 00                               
+[ 415]    093A: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 19,0000_1111b,"                     :::::      ::::::::::   "
+                0F B9 2D 00 B2 03 B6 13 BD 56 09 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 3A 3A 3A 3A 3A 20 20 20 20 20 20 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 20 
+                20 00                               
+[ 416]    0984: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 20,0000_1111b,"                     ::::::      ::::::::    "
+                0F B9 2D 00 B2 03 B6 14 BD A0 09 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 3A 3A 3A 3A 3A 3A 20 20 20 20 20 
+                20 3A 3A 3A 3A 3A 3A 3A 3A 20 20 20 
+                20 00                               
+[ 417]    09CE: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 21,0000_1111b,"                     ::::::::::::::::::::    "
+                0F B9 2D 00 B2 03 B6 15 BD EA 09 CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 3A 20 20 20 
+                20 00                               
+[ 418]    0A18: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 22,0000_1111b,"                     :::::::::::::::::::     "
+                0F B9 2D 00 B2 03 B6 16 BD 34 0A CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 20 20 20 20 
+                20 00                               
+[ 419]    0A62: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 23,0000_1111b,"                     ::::    :::::::::::     "
+                0F B9 2D 00 B2 03 B6 17 BD 7E 0A CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 3A 3A 3A 3A 20 20 20 20 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 3A 20 20 20 20 
+                20 00                               
+[ 420]    0AAC: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 24,0000_1111b,"                     ::::::::::::::::::      "
+                0F B9 2D 00 B2 03 B6 18 BD C8 0A CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 3A 20 20 20 20 20 
+                20 00                               
+[ 421]    0AF6: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 25,0000_1111b,"                         :::::::::::::       "
+                0F B9 2D 00 B2 03 B6 19 BD 12 0B CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 3A 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 3A 3A 20 20 20 20 20 20 
+                20 00                               
+[ 422]    0B40: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 26,0000_1111b,"                          ::::::::::         "
+                0F B9 2D 00 B2 03 B6 1A BD 5C 0B CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 3A 3A 3A 3A 3A 3A 
+                3A 3A 3A 3A 20 20 20 20 20 20 20 20 
+                20 00                               
+[ 423]    0B8A: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 27,0000_1111b,"                            :::::::          "
+                0F B9 2D 00 B2 03 B6 1B BD A6 0B CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 3A 3A 3A 3A 
+                3A 3A 3A 20 20 20 20 20 20 20 20 20 
+                20 00                               
+[ 424]    0BD4: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 28,0000_1111b,"                              :              "
+                0F B9 2D 00 B2 03 B6 1C BD F0 0B CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 3A 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 00                               
+[ 425]    0C1E: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 29,0000_1111b,"                    ::::     ::              "
+                0F B9 2D 00 B2 03 B6 1D BD 3A 0C CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                3A 3A 3A 3A 20 20 20 20 20 3A 3A 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 00                               
+[ 426]    0C68: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 30,0000_1111b,"                     :::::::::  :::          "
+                0F B9 2D 00 B2 03 B6 1E BD 84 0C CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 3A 3A 3A 3A 3A 3A 3A 3A 3A 20 20 
+                3A 3A 3A 20 20 20 20 20 20 20 20 20 
+                20 00                               
+[ 427]    0CB2: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 31,0000_1111b,"                       ::::                  "
+                0F B9 2D 00 B2 03 B6 1F BD CE 0C CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 3A 3A 3A 3A 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 00                               
+[ 428]    0CFC: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 3, 32,0000_1111b,"                         :                   "
+                0F B9 2D 00 B2 03 B6 20 BD 18 0D CD 
+                10 61 EB 2E 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 20 20 20 20 3A 20 20 20 20 20 20 
+                20 20 20 20 20 20 20 20 20 20 20 20 
+                20 00                               
+[ 429]        :                                       
+[ 430]        :                                       
+[ 431]        :                                       
+[ 432]    0D46: B8 00 00                              mov ax, 0  ; wait for any key....
+[ 433]    0D49: CD 16                                 int 16h
+[ 434]    0D4B: C3                                    ret
+[ 435]        :                                       draw_command endp
+[ 436]    0D4C: E9 B1 F2                              jmp
+[ 437]        :                                       
+[ 438]        :                                       
+[ 439]        :                                       
+[ 440]        :                                       ; +++ 'quit', 'exit', 'reboot' +++
+[ 441]    0D4F:                                       reboot_command:
+[ 442]    0D4F: E8 27 01                              call    clear_screen
+[ 443]    0D52: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 5,2,0000_1111b, "TURK-OS'U KULLANDIGINIZ ICIN TESEKKURLER!!"
+                0F B9 2A 00 B2 05 B6 02 BD 6E 0D CD 
+                10 61 EB 2B 54 55 52 4B 2D 4F 53 27 
+                55 20 4B 55 4C 4C 41 4E 44 49 47 49 
+                4E 49 5A 20 49 43 49 4E 20 54 45 53 
+                45 4B 4B 55 52 4C 45 52 21 21 00    
+[ 444]    0D99: 60 8C CA 8E C2 B4 13 B0 01 B7 00 B3   print 5,3,0000_1111b, "Yeniden baslatmak icin herhangi bir tusa basin"
+                0F B9 2E 00 B2 05 B6 03 BD B5 0D CD 
+                10 61 EB 2F 59 65 6E 69 64 65 6E 20 
+                62 61 73 6C 61 74 6D 61 6B 20 69 63 
+                69 6E 20 68 65 72 68 61 6E 67 69 20 
+                62 69 72 20 74 75 73 61 20 62 61 73 
+                69 6E 00                            
+[ 445]    0DE4: B8 00 00                              mov ax, 0  ; wait for any key....
+[ 446]    0DE7: CD 16                                 int 16h
+[ 447]        :                                       
+[ 448]        :                                       ; store magic value at 0040h:0072h:
+[ 449]        :                                       ;   0000h - cold boot.
+[ 450]        :                                       ;   1234h - warm boot.
+[ 451]    0DE9: B8 40 00                              mov     ax, 0040h
+[ 452]    0DEC: 8E D8                                 mov     ds, ax
+[ 453]    0DEE: C7 06 72 00 00 00                     mov     w.[0072h], 0000h ; cold boot.
+[ 454]    0DF4: EA 00 00 FF FF                        jmp	0ffffh:0000h	 ; reboot!
+[ 455]        :                                       
+[ 456]        :                                       ; ++++++++++++++++++++++++++
+[ 457]        :                                       
+[ 458]    0DF9:                                       processed:
+[ 459]    0DF9: C3                                    ret
+[ 460]        :                                       
+[ 461]        :                                       
+[ 462]        :                                       ;===========================================
+[ 463]        :                                       
+[ 464]        :                                       ; scroll all screen except last row
+[ 465]        :                                       ; up by value specified in al
+[ 466]        :                                       
+[ 467]    0DFA:                                       scroll_t_area   proc    near
+[ 468]        :                                       
+[ 469]    0DFA: BA 40 00                              mov dx, 40h
+[ 470]    0DFD: 8E C2                                 mov es, dx  ; for getting screen parameters.
+[ 471]    0DFF: B4 06                                 mov ah, 06h ; scroll up function id.
+[ 472]    0E01: B7 07                                 mov bh, 07  ; attribute for new lines.
+[ 473]    0E03: B5 00                                 mov ch, 0   ; upper row.
+[ 474]    0E05: B1 00                                 mov cl, 0   ; upper col.
+[ 475]    0E07: BF 84 00                              mov di, 84h ; rows on screen -1,
+[ 476]    0E0A: 26 8A 35                              mov dh, es:[di] ; lower row (byte).
+[ 477]    0E0D: FE CE                                 dec dh  ; don't scroll bottom line.
+[ 478]    0E0F: BF 4A 00                              mov di, 4ah ; columns on screen,
+[ 479]    0E12: 26 8A 15                              mov dl, es:[di]
+[ 480]    0E15: FE CA                                 dec dl  ; lower col.
+[ 481]    0E17: CD 10                                 int 10h
+[ 482]        :                                       
+[ 483]    0E19: C3                                    ret
+[ 484]        :                                       scroll_t_area   endp
+[ 485]        :                                       
+[ 486]        :                                       ;===========================================
+[ 487]        :                                       
+[ 488]        :                                       
+[ 489]        :                                       
+[ 490]        :                                       
+[ 491]        :                                       ; get characters from keyboard and write a null terminated string
+[ 492]        :                                       ; to buffer at DS:DI, maximum buffer size is in DX.
+[ 493]        :                                       ; 'enter' stops the input.
+[ 494]    0E1A:                                       get_string      proc    near
+[ 495]    0E1A: 50                                    push    ax
+[ 496]    0E1B: 51                                    push    cx
+[ 497]    0E1C: 57                                    push    di
+[ 498]    0E1D: 52                                    push    dx
+[ 499]        :                                       
+[ 500]    0E1E: B9 00 00                              mov     cx, 0                   ; char counter.
+[ 501]        :                                       
+[ 502]    0E21: 83 FA 01                              cmp     dx, 1                   ; buffer too small?
+[ 503]    0E24: 76 3C                                 jbe     empty_buffer            ;
+[ 504]        :                                       
+[ 505]    0E26: 4A                                    dec     dx                      ; reserve space for last zero.
+[ 506]        :                                       
+[ 507]        :                                       
+[ 508]        :                                       ;============================
+[ 509]        :                                       ; eternal loop to get
+[ 510]        :                                       ; and processes key presses:
+[ 511]        :                                       
+[ 512]    0E27:                                       wait_for_key:
+[ 513]        :                                       
+[ 514]    0E27: B4 00                                 mov     ah, 0                   ; get pressed key.
+[ 515]    0E29: CD 16                                 int     16h
+[ 516]        :                                       
+[ 517]    0E2B: 3C 0D                                 cmp     al, 0Dh                 ; 'return' pressed?
+[ 518]    0E2D: 74 30                                 jz      exit
+[ 519]        :                                       
+[ 520]        :                                       
+[ 521]    0E2F: 3C 08                                 cmp     al, 8                   ; 'backspace' pressed?
+[ 522]    0E31: 75 1E                                 jne     add_to_buffer
+[ 523]    0E33: E3 F2                                 jcxz    wait_for_key            ; nothing to remove!
+[ 524]    0E35: 49                                    dec     cx
+[ 525]    0E36: 4F                                    dec     di
+[ 526]    0E37: 50 B0 08 B4 0E CD 10 58               putc    8                       ; backspace.
+[ 527]    0E3F: 50 B0 20 B4 0E CD 10 58               putc    ' '                     ; clear position.
+[ 528]    0E47: 50 B0 08 B4 0E CD 10 58               putc    8                       ; backspace again.
+[ 529]    0E4F: EB D6                                 jmp     wait_for_key
+[ 530]        :                                       
+[ 531]    0E51:                                       add_to_buffer:
+[ 532]        :                                       
+[ 533]    0E51: 3B CA                                 cmp     cx, dx          ; buffer is full?
+[ 534]    0E53: 73 D2                                 jae     wait_for_key    ; if so wait for 'backspace' or 'return'...
+[ 535]        :                                       
+[ 536]    0E55: 88 05                                 mov     [di], al
+[ 537]    0E57: 47                                    inc     di
+[ 538]    0E58: 41                                    inc     cx
+[ 539]        :                                       
+[ 540]        :                                       ; print the key:
+[ 541]    0E59: B4 0E                                 mov     ah, 0eh
+[ 542]    0E5B: CD 10                                 int     10h
+[ 543]        :                                       
+[ 544]    0E5D: EB C8                                 jmp     wait_for_key
+[ 545]        :                                       ;============================
+[ 546]        :                                       
+[ 547]    0E5F:                                       exit:
+[ 548]        :                                       
+[ 549]        :                                       ; terminate by null:
+[ 550]    0E5F: C6 05 00                              mov     [di], 0
+[ 551]        :                                       
+[ 552]    0E62:                                       empty_buffer:
+[ 553]    0E62: 5A                                    pop     dx
+[ 554]    0E63: 5F                                    pop     di
+[ 555]    0E64: 59                                    pop     cx
+[ 556]    0E65: 58                                    pop     ax
+[ 557]    0E66: C3                                    ret
+[ 558]        :                                       get_string      endp
+[ 559]        :                                       
+[ 560]        :                                       
+[ 561]        :                                       
+[ 562]        :                                       
+[ 563]        :                                       ; print a null terminated string at current cursor position,
+[ 564]        :                                       ; string address: ds:si
+[ 565]    0E67:                                       print_string proc near
+[ 566]    0E67: 50                                    push    ax      ; store registers...
+[ 567]    0E68: 56                                    push    si      ;
+[ 568]        :                                       
+[ 569]    0E69:                                       next_char:
+[ 570]    0E69: 8A 04                                 mov     al, [si]
+[ 571]    0E6B: 3C 00                                 cmp     al, 0
+[ 572]    0E6D: 74 07                                 jz      printed
+[ 573]    0E6F: 46                                    inc     si
+[ 574]    0E70: B4 0E                                 mov     ah, 0eh ; teletype function.
+[ 575]    0E72: CD 10                                 int     10h
+[ 576]    0E74: EB F3                                 jmp     next_char
+[ 577]    0E76:                                       printed:
+[ 578]        :                                       
+[ 579]    0E76: 5E                                    pop     si      ; re-store registers...
+[ 580]    0E77: 58                                    pop     ax      ;
+[ 581]        :                                       
+[ 582]    0E78: C3                                    ret
+[ 583]        :                                       print_string endp
+[ 584]        :                                       
+[ 585]        :                                       
+[ 586]        :                                       
+[ 587]        :                                       ; clear the screen by scrolling entire screen window,
+[ 588]        :                                       ; and set cursor position on top.
+[ 589]        :                                       ; default attribute is set to white on blue.
+[ 590]    0E79:                                       clear_screen proc near
+[ 591]    0E79: 50                                    push    ax      ; store registers...
+[ 592]    0E7A: 1E                                    push    ds      ;
+[ 593]    0E7B: 53                                    push    bx      ;
+[ 594]    0E7C: 51                                    push    cx      ;
+[ 595]    0E7D: 57                                    push    di      ;
+[ 596]        :                                       
+[ 597]    0E7E: B8 40 00                              mov     ax, 40h
+[ 598]    0E81: 8E D8                                 mov     ds, ax  ; for getting screen parameters.
+[ 599]    0E83: B4 06                                 mov     ah, 06h ; scroll up function id.
+[ 600]    0E85: B0 00                                 mov     al, 0   ; scroll all lines!
+[ 601]    0E87: B7 0F                                 mov     bh, 0000_1111b  ; attribute for new lines.
+[ 602]    0E89: B5 00                                 mov     ch, 0   ; upper row.
+[ 603]    0E8B: B1 00                                 mov     cl, 0   ; upper col.
+[ 604]    0E8D: BF 84 00                              mov     di, 84h ; rows on screen -1,
+[ 605]    0E90: 8A 35                                 mov     dh, [di] ; lower row (byte).
+[ 606]    0E92: BF 4A 00                              mov     di, 4ah ; columns on screen,
+[ 607]    0E95: 8A 15                                 mov     dl, [di]
+[ 608]    0E97: FE CA                                 dec     dl      ; lower col.
+[ 609]    0E99: CD 10                                 int     10h
+[ 610]        :                                       
+[ 611]        :                                       ; set cursor position to top
+[ 612]        :                                       ; of the screen:
+[ 613]    0E9B: B7 00                                 mov     bh, 0   ; current page.
+[ 614]    0E9D: B2 08                                 mov     dl, 8   ; col.
+[ 615]    0E9F: B6 08                                 mov     dh, 8   ; row.
+[ 616]    0EA1: B4 02                                 mov     ah, 02
+[ 617]    0EA3: CD 10                                 int     10h
+[ 618]        :                                       
+[ 619]    0EA5: 5F                                    pop     di      ; re-store registers...
+[ 620]    0EA6: 59                                    pop     cx      ;
+[ 621]    0EA7: 5B                                    pop     bx      ;
+[ 622]    0EA8: 1F                                    pop     ds      ;
+[ 623]    0EA9: 58                                    pop     ax      ;
+[ 624]        :                                       
+[ 625]    0EAA: C3                                    ret
+[ 626]        :                                       clear_screen endp
+[ 627]        :                                       
+[ 628]        :                                       
+[ 629]        :                                       
+[ 630]        :                                       ;++++++ 'factorial' command ++++++
+[ 631]    0EAB:                                       factorial_command:
+[ 632]        :                                       
+[ 633]        :                                       
+[ 634]        :                                       ; this example gets the number from the user,
+[ 635]        :                                       ; and calculates factorial for it.
+[ 636]        :                                       ; supported input from 0 to 8 inclusive!
+[ 637]        :                                       
+[ 638]        :                                       name "fact"
+[ 639]        :                                       
+[ 640]    0EAB: E8 CB FF                              call clear_screen
+[ 641]        :                                       
+[ 642]        :                                       ; this macro prints a char in AL and advances
+[ 643]        :                                       ; the current cursor position:
+[ 644]        :                                       put    macro   char
+[ 645]        :                                       push    ax
+[ 646]        :                                       mov     al, char
+[ 647]        :                                       mov     ah, 0eh
+[ 648]        :                                       int     10h
+[ 649]        :                                       pop     ax
+[ 650]        :                                       endm
+[ 651]        :                                       
+[ 652]        :                                       
+[ 653]        :                                       
+[ 654]        :                                       
+[ 655]    0EAE: EB 02                                 jmp startf
+[ 656]        :                                       
+[ 657]        :                                       
+[ 658]    0EB0: 00 00                                 result dw ?
+[ 659]        :                                       
+[ 660]        :                                       
+[ 661]        :                                       
+[ 662]    0EB2:                                       startf:
+[ 663]        :                                       
+[ 664]        :                                       ; get first number:
+[ 665]        :                                       
+[ 666]    0EB2: B0 01                                 	mov al, 1
+[ 667]    0EB4: B7 00                                 	mov bh, 0
+[ 668]    0EB6: B3 0F                                 	mov bl, 0000_1111b
+[ 669]    0EB8: B9 1A 00                              	mov cx, n1end - offset msg1 ; calculate message size.
+[ 670]    0EBB: B2 00                                 	mov dl, 0
+[ 671]    0EBD: B6 00                                 	mov dh, 0
+[ 672]    0EBF: 0E                                    	push cs
+[ 673]    0EC0: 07                                    	pop es
+[ 674]    0EC1: BD CE 0E                              	mov bp, offset msg1
+[ 675]    0EC4: B4 13                                 	mov ah, 13h
+[ 676]    0EC6: CD 10                                 	int 10h
+[ 677]    0EC8: B4 01                                 	mov ah, 01h
+[ 678]    0ECA: CD 16                                 	int 16h
+[ 679]        :                                       	
+[ 680]    0ECC: EB 1A                                 jmp n1end
+[ 681]    0ECE: 0D 0A 30 2D 38 20 61 72 61 73 8D 20   msg1 db 0Dh,0Ah, '0-8 aras',141,' say',141,' giriniz: '
+                73 61 79 8D 20 67 69 72 69 6E 69 7A 
+                3A 20                               
+[ 682]    0EE8:                                       n1end:
+[ 683]        :                                       
+[ 684]    0EE8: E8 A6 00                              call    scan_numf
+[ 685]        :                                       
+[ 686]        :                                       
+[ 687]        :                                       ; factorial of 0 = 1:
+[ 688]    0EEB: B8 01 00                              mov     ax, 1
+[ 689]    0EEE: 83 F9 00                              cmp     cx, 0
+[ 690]    0EF1: 74 15                                 je      print_result
+[ 691]        :                                       
+[ 692]        :                                       ; move the number to bx:
+[ 693]        :                                       ; cx will be a counter:
+[ 694]        :                                       
+[ 695]    0EF3: 8B D9                                 mov     bx, cx
+[ 696]        :                                       
+[ 697]    0EF5: B8 01 00                              mov     ax, 1
+[ 698]    0EF8: BB 01 00                              mov     bx, 1
+[ 699]        :                                       
+[ 700]    0EFB:                                       calc_it:
+[ 701]    0EFB: F7 E3                                 mul     bx
+[ 702]    0EFD: 83 FA 00                              cmp     dx, 0
+[ 703]    0F00: 75 3B                                 jne     overflow
+[ 704]    0F02: 43                                    inc     bx
+[ 705]    0F03: E2 F6                                 loop    calc_it
+[ 706]        :                                       
+[ 707]    0F05: A3 B0 0E                              mov result, ax
+[ 708]        :                                       
+[ 709]        :                                       
+[ 710]    0F08:                                       print_result:
+[ 711]        :                                       
+[ 712]        :                                       ; print result in ax:
+[ 713]    0F08: B0 01                                 mov al, 1
+[ 714]    0F0A: B7 00                                 	mov bh, 0
+[ 715]    0F0C: B3 0F                                 	mov bl, 0000_1111b
+[ 716]    0F0E: B9 0E 00                              	mov cx, n2 - offset msg2 ; calculate message size.
+[ 717]    0F11: B2 02                                 	mov dl, 2
+[ 718]    0F13: B6 02                                 	mov dh, 2
+[ 719]    0F15: 0E                                    	push cs
+[ 720]    0F16: 07                                    	pop es
+[ 721]    0F17: BD 20 0F                              	mov bp, offset msg2
+[ 722]    0F1A: B4 13                                 	mov ah, 13h
+[ 723]    0F1C: CD 10                                 	int 10h
+[ 724]    0F1E: EB 0E                                 jmp n2
+[ 725]    0F20: 0D 0A 46 61 6B 74 94 72 69 79 65 6C   msg2 db 0Dh,0Ah, 'Fakt',148,'riyel: '
+                3A 20                               
+[ 726]    0F2E:                                       n2:
+[ 727]        :                                       
+[ 728]    0F2E: 83 3E B0 0E 00                        cmp result, 0
+[ 729]    0F33: 74 4F                                 je  is_0
+[ 730]        :                                       
+[ 731]        :                                       
+[ 732]    0F35: A1 B0 0E                              mov     ax, result
+[ 733]    0F38: E8 39 01                              call    print_num_unsf
+[ 734]    0F3B: EB 4F                                 jmp     exitf
+[ 735]        :                                       
+[ 736]        :                                       
+[ 737]    0F3D:                                       overflow:
+[ 738]    0F3D: B0 01                                 mov al, 1
+[ 739]    0F3F: B7 00                                 	mov bh, 0
+[ 740]    0F41: B3 0F                                 	mov bl, 0000_1111b
+[ 741]    0F43: B9 2C 00                              	mov cx, n3 - offset msg3 ; calculate message size.
+[ 742]    0F46: B2 02                                 	mov dl, 2
+[ 743]    0F48: B6 02                                 	mov dh, 2
+[ 744]    0F4A: 0E                                    	push cs
+[ 745]    0F4B: 07                                    	pop es
+[ 746]    0F4C: BD 55 0F                              	mov bp, offset msg3
+[ 747]    0F4F: B4 13                                 	mov ah, 13h
+[ 748]    0F51: CD 10                                 	int 10h
+[ 749]    0F53: EB 2C                                 jmp n3
+[ 750]    0F55: 0D 0A 53 6F 6E 75 87 20 87 6F 6B 20   msg3 db 0Dh,0Ah, 'Sonu',135,' ',135,'ok b',129,'y',129,'k!', 0Dh,0Ah, '0-8 aras',141,' de',167,'er giriniz.'
+                62 81 79 81 6B 21 0D 0A 30 2D 38 20 
+                61 72 61 73 8D 20 64 65 A7 65 72 20 
+                67 69 72 69 6E 69 7A 2E             
+[ 751]    0F81:                                       n3:
+[ 752]    0F81: E9 2E FF                              jmp     startf
+[ 753]        :                                       
+[ 754]    0F84:                                       is_0:
+[ 755]    0F84: B8 01 00                              mov ax, 1
+[ 756]    0F87: E8 EA 00                              call    print_num_unsf
+[ 757]    0F8A: EB 00                                 jmp     exitf
+[ 758]        :                                       
+[ 759]    0F8C:                                       exitf:
+[ 760]        :                                       
+[ 761]        :                                       ; wait for any key press:
+[ 762]    0F8C: B4 00                                 mov ah, 0
+[ 763]    0F8E: CD 16                                 int 16h
+[ 764]        :                                       
+[ 765]    0F90: C3                                    ret
+[ 766]        :                                       
+[ 767]        :                                       
+[ 768]        :                                       
+[ 769]        :                                       
+[ 770]        :                                       
+[ 771]        :                                       
+[ 772]        :                                       
+[ 773]        :                                       
+[ 774]        :                                       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+[ 775]        :                                       ;;; these functions are copied from emu8086.inc ;;;
+[ 776]        :                                       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+[ 777]        :                                       
+[ 778]        :                                       
+[ 779]        :                                       ; gets the multi-digit SIGNED number from the keyboard,
+[ 780]        :                                       ; and stores the result in CX register:
+[ 781]    0F91:                                       SCAN_NUMf        PROC    NEAR
+[ 782]    0F91: 52                                    PUSH    DX
+[ 783]    0F92: 50                                    PUSH    AX
+[ 784]    0F93: 56                                    PUSH    SI
+[ 785]        :                                       
+[ 786]    0F94: B9 00 00                              MOV     CX, 0
+[ 787]        :                                       
+[ 788]        :                                       ; reset flag:
+[ 789]    0F97: 2E C6 06 4D 10 00                     MOV     CS:make_minusf, 0
+[ 790]        :                                       
+[ 791]    0F9D:                                       next_digitf:
+[ 792]        :                                       
+[ 793]        :                                       ; get char from keyboard
+[ 794]        :                                       ; into AL:
+[ 795]    0F9D: B4 00                                 MOV     AH, 00h
+[ 796]    0F9F: CD 16                                 INT     16h
+[ 797]        :                                       ; and print it:
+[ 798]    0FA1: B4 0E                                 MOV     AH, 0Eh
+[ 799]    0FA3: CD 10                                 INT     10h
+[ 800]        :                                       
+[ 801]        :                                       ; check for MINUS:
+[ 802]        :                                       ;CMP     AL, '-'
+[ 803]        :                                       ;JE      set_minusf
+[ 804]        :                                       
+[ 805]        :                                       ; check for ENTER key:
+[ 806]    0FA5: 3C 0D                                 CMP     AL, 0Dh  ; carriage return?
+[ 807]    0FA7: 75 03                                 JNE     not_crf
+[ 808]    0FA9: E9 93 00                              JMP     stop_inputf
+[ 809]    0FAC:                                       not_crf:
+[ 810]        :                                       
+[ 811]        :                                       
+[ 812]    0FAC: 3C 08                                 CMP     AL, 8                   ; 'BACKSPACE' pressed?
+[ 813]    0FAE: 75 1E                                 JNE     backspace_checkedf
+[ 814]    0FB0: BA 00 00                              MOV     DX, 0                   ; remove last digit by
+[ 815]    0FB3: 8B C1                                 MOV     AX, CX                  ; division:
+[ 816]    0FB5: 2E F7 36 C2 10                        DIV     CS:ten                  ; AX = DX:AX / 10 (DX-rem).
+[ 817]    0FBA: 8B C8                                 MOV     CX, AX
+[ 818]    0FBC: 50 B0 20 B4 0E CD 10 58               PUT    ' '                     ; clear position.
+[ 819]    0FC4: 50 B0 08 B4 0E CD 10 58               PUT    8                       ; backspace again.
+[ 820]    0FCC: EB CF                                 JMP     next_digitf
+[ 821]    0FCE:                                       backspace_checkedf:
+[ 822]        :                                       
+[ 823]        :                                       
+[ 824]        :                                       ; allow only digits:
+[ 825]    0FCE: 3C 30                                 CMP     AL, '0'
+[ 826]    0FD0: 73 02                                 JAE     ok_AE_0f
+[ 827]    0FD2: EB 04                                 JMP     remove_not_digitf
+[ 828]    0FD4:                                       ok_AE_0f:
+[ 829]    0FD4: 3C 39                                 CMP     AL, '9'
+[ 830]    0FD6: 76 1A                                 JBE     ok_digitf
+[ 831]    0FD8:                                       remove_not_digitf:
+[ 832]    0FD8: 50 B0 08 B4 0E CD 10 58               PUT    8       ; backspace.
+[ 833]    0FE0: 50 B0 20 B4 0E CD 10 58               PUT    ' '     ; clear last entered not digit.
+[ 834]    0FE8: 50 B0 08 B4 0E CD 10 58               PUT    8       ; backspace again.
+[ 835]    0FF0: EB AB                                 JMP     next_digitf ; wait for next input.
+[ 836]    0FF2:                                       ok_digitf:
+[ 837]        :                                       
+[ 838]        :                                       
+[ 839]        :                                       ; multiply CX by 10 (first time the result is zero)
+[ 840]    0FF2: 50                                    PUSH    AX
+[ 841]    0FF3: 8B C1                                 MOV     AX, CX
+[ 842]    0FF5: 2E F7 26 C2 10                        MUL     CS:ten                  ; DX:AX = AX*10
+[ 843]    0FFA: 8B C8                                 MOV     CX, AX
+[ 844]    0FFC: 58                                    POP     AX
+[ 845]        :                                       
+[ 846]        :                                       ; check if the number is too big
+[ 847]        :                                       ; (result should be 16 bits)
+[ 848]    0FFD: 83 FA 00                              CMP     DX, 0
+[ 849]    1000: 75 19                                 JNE     too_bigf
+[ 850]        :                                       
+[ 851]        :                                       ; convert from ASCII code:
+[ 852]    1002: 2C 30                                 SUB     AL, 30h
+[ 853]        :                                       
+[ 854]        :                                       ; add AL to CX:
+[ 855]    1004: B4 00                                 MOV     AH, 0
+[ 856]    1006: 8B D1                                 MOV     DX, CX      ; backup, in case the result will be too big.
+[ 857]    1008: 03 C8                                 ADD     CX, AX
+[ 858]    100A: 72 0A                                 JC      too_big2f    ; jump if the number is too big.
+[ 859]        :                                       
+[ 860]    100C: EB 8F                                 JMP     next_digitf
+[ 861]        :                                       
+[ 862]    100E:                                       set_minusf:
+[ 863]    100E: 2E C6 06 4D 10 01                     MOV     CS:make_minusf, 1
+[ 864]    1014: EB 87                                 JMP     next_digitf
+[ 865]        :                                       
+[ 866]    1016:                                       too_big2f:
+[ 867]    1016: 8B CA                                 MOV     CX, DX      ; restore the backuped value before add.
+[ 868]    1018: BA 00 00                              MOV     DX, 0       ; DX was zero before backup!
+[ 869]    101B:                                       too_bigf:
+[ 870]    101B: 8B C1                                 MOV     AX, CX
+[ 871]    101D: 2E F7 36 C2 10                        DIV     CS:ten  ; reverse last DX:AX = AX*10, make AX = DX:AX / 10
+[ 872]    1022: 8B C8                                 MOV     CX, AX
+[ 873]    1024: 50 B0 08 B4 0E CD 10 58               PUT    8       ; backspace.
+[ 874]    102C: 50 B0 20 B4 0E CD 10 58               PUT    ' '     ; clear last entered digit.
+[ 875]    1034: 50 B0 08 B4 0E CD 10 58               PUT    8       ; backspace again.
+[ 876]    103C: E9 5E FF                              JMP     next_digitf ; wait for Enter/Backspace.
+[ 877]        :                                       
+[ 878]        :                                       
+[ 879]    103F:                                       stop_inputf:
+[ 880]        :                                       ; check flag:
+[ 881]    103F: 2E 80 3E 4D 10 00                     CMP     CS:make_minusf, 0
+[ 882]    1045: 74 02                                 JE      not_minusf
+[ 883]    1047: F7 D9                                 NEG     CX
+[ 884]    1049:                                       not_minusf:
+[ 885]        :                                       
+[ 886]    1049: 5E                                    POP     SI
+[ 887]    104A: 58                                    POP     AX
+[ 888]    104B: 5A                                    POP     DX
+[ 889]    104C: C3                                    RET
+[ 890]    104D: 00                                    make_minusf      DB      ?       ; used as a flag.
+[ 891]        :                                       SCAN_NUMf        ENDP
+[ 892]        :                                       
+[ 893]        :                                       
+[ 894]        :                                       
+[ 895]        :                                       
+[ 896]        :                                       
+[ 897]        :                                       ; this procedure prints number in AX,
+[ 898]        :                                       ; used with PRINT_NUM_UNS to print signed numbers:
+[ 899]    104E:                                       PRINT_NUMf       PROC    NEAR
+[ 900]    104E: 52                                    PUSH    DX
+[ 901]    104F: 50                                    PUSH    AX
+[ 902]        :                                       
+[ 903]    1050: 3D 00 00                              CMP     AX, 0
+[ 904]    1053: 75 0A                                 JNZ     not_zerof
+[ 905]        :                                       
+[ 906]    1055: 50 B0 30 B4 0E CD 10 58               PUT    '0'
+[ 907]    105D: EB 12                                 JMP     printedf
+[ 908]        :                                       
+[ 909]    105F:                                       not_zerof:
+[ 910]        :                                       ; the check SIGN of AX,
+[ 911]        :                                       ; make absolute if it's negative:
+[ 912]    105F: 3D 00 00                              CMP     AX, 0
+[ 913]    1062: 79 0A                                 JNS     positivef
+[ 914]    1064: F7 D8                                 NEG     AX
+[ 915]        :                                       
+[ 916]    1066: 50 B0 2D B4 0E CD 10 58               PUT    '-'
+[ 917]        :                                       
+[ 918]    106E:                                       positivef:
+[ 919]    106E: E8 03 00                              CALL    PRINT_NUM_UNSf
+[ 920]    1071:                                       printedf:
+[ 921]    1071: 58                                    POP     AX
+[ 922]    1072: 5A                                    POP     DX
+[ 923]    1073: C3                                    RET
+[ 924]        :                                       PRINT_NUMf       ENDP
+[ 925]        :                                       
+[ 926]        :                                       
+[ 927]        :                                       
+[ 928]        :                                       ; this procedure prints out an unsigned
+[ 929]        :                                       ; number in AX (not just a single digit)
+[ 930]        :                                       ; allowed values are from 0 to 65535 (FFFF)
+[ 931]    1074:                                       PRINT_NUM_UNSf   PROC    NEAR
+[ 932]    1074: 50                                    PUSH    AX
+[ 933]    1075: 53                                    PUSH    BX
+[ 934]    1076: 51                                    PUSH    CX
+[ 935]    1077: 52                                    PUSH    DX
+[ 936]        :                                       
+[ 937]        :                                       ; flag to prevent printing zeros before number:
+[ 938]    1078: B9 01 00                              MOV     CX, 1
+[ 939]        :                                       
+[ 940]        :                                       ; (result of "/ 10000" is always less or equal to 9).
+[ 941]    107B: BB 10 27                              MOV     BX, 10000       ; 2710h - divider.
+[ 942]        :                                       
+[ 943]        :                                       ; AX is zero?
+[ 944]    107E: 3D 00 00                              CMP     AX, 0
+[ 945]    1081: 74 32                                 JZ      print_zerof
+[ 946]        :                                       
+[ 947]    1083:                                       begin_printf:
+[ 948]        :                                       
+[ 949]        :                                       ; check divider (if zero go to end_print):
+[ 950]    1083: 83 FB 00                              CMP     BX,0
+[ 951]    1086: 74 35                                 JZ      end_printf
+[ 952]        :                                       
+[ 953]        :                                       ; avoid printing zeros before number:
+[ 954]    1088: 83 F9 00                              CMP     CX, 0
+[ 955]    108B: 74 04                                 JE      calcf
+[ 956]        :                                       ; if AX<BX then result of DIV will be zero:
+[ 957]    108D: 3B C3                                 CMP     AX, BX
+[ 958]    108F: 72 14                                 JB      skipf
+[ 959]    1091:                                       calcf:
+[ 960]    1091: B9 00 00                              MOV     CX, 0   ; set flag.
+[ 961]        :                                       
+[ 962]    1094: BA 00 00                              MOV     DX, 0
+[ 963]    1097: F7 F3                                 DIV     BX      ; AX = DX:AX / BX   (DX=remainder).
+[ 964]        :                                       
+[ 965]        :                                       ; print last digit
+[ 966]        :                                       ; AH is always ZERO, so it's ignored
+[ 967]    1099: 04 30                                 ADD     AL, 30h    ; convert to ASCII code.
+[ 968]    109B: 50 8A C0 B4 0E CD 10 58               PUT    AL
+[ 969]        :                                       
+[ 970]        :                                       
+[ 971]    10A3: 8B C2                                 MOV     AX, DX  ; get remainder from last div.
+[ 972]        :                                       
+[ 973]    10A5:                                       skipf:
+[ 974]        :                                       ; calculate BX=BX/10
+[ 975]    10A5: 50                                    PUSH    AX
+[ 976]    10A6: BA 00 00                              MOV     DX, 0
+[ 977]    10A9: 8B C3                                 MOV     AX, BX
+[ 978]    10AB: 2E F7 36 C2 10                        DIV     CS:ten  ; AX = DX:AX / 10   (DX=remainder).
+[ 979]    10B0: 8B D8                                 MOV     BX, AX
+[ 980]    10B2: 58                                    POP     AX
+[ 981]        :                                       
+[ 982]    10B3: EB CE                                 JMP     begin_printf
+[ 983]        :                                       
+[ 984]    10B5:                                       print_zerof:
+[ 985]    10B5: 50 B0 30 B4 0E CD 10 58               PUT    '0'
+[ 986]        :                                       
+[ 987]    10BD:                                       end_printf:
+[ 988]        :                                       
+[ 989]    10BD: 5A                                    POP     DX
+[ 990]    10BE: 59                                    POP     CX
+[ 991]    10BF: 5B                                    POP     BX
+[ 992]    10C0: 58                                    POP     AX
+[ 993]    10C1: C3                                    RET
+[ 994]        :                                       PRINT_NUM_UNSf   ENDP
+[ 995]        :                                       
+[ 996]        :                                       
+[ 997]        :                                       
+[ 998]    10C2: 0A 00                                 ten             DW      10      ; used as multiplier/divider by SCAN_NUM & PRINT_NUM_UNS.
+[ 999]        :                                       
+[1000]        :                                       
+[1001]        :                                       
+[1002]        :                                       
+[1003]        :                                       
+[1004]        :                                       
+[1005]        :                                       ; ++++++ 'Prepared By ' Command ++++++
+[1006]        :                                       
+[1007]    10C4:                                       prep_command:
+[1008]        :                                       
+[1009]    10C4: E8 B2 FD                              call clear_screen
+[1010]        :                                       
+[1011]        :                                       
+[1012]        :                                       
+[1013]        :                                       
+[1014]        :                                       
+[1015]    10C7: B0 01                                 	mov al, 1
+[1016]    10C9: B7 00                                 	mov bh, 0
+[1017]    10CB: B3 0F                                 	mov bl, 0000_1111b
+[1018]    10CD: B9 22 00                              	mov cx, n33end - offset msg33 ; calculate message size.
+[1019]    10D0: B2 00                                 	mov dl, 0
+[1020]    10D2: B6 00                                 	mov dh, 0
+[1021]    10D4: 0E                                    	push cs ;cs yi yedekleyerek stack e atip sonra onu es ile cagiriyor
+[1022]    10D5: 07                                    	pop es
+[1023]    10D6: BD E3 10                              	mov bp, offset msg33
+[1024]    10D9: B4 13                                 	mov ah, 13h
+[1025]    10DB: CD 10                                 	int 10h
+[1026]    10DD: B4 01                                 	mov ah, 01h
+[1027]    10DF: CD 16                                 	int 16h
+[1028]        :                                       	
+[1029]    10E1: EB 22                                 jmp n33end
+[1030]    10E3: 0D 0A 4D 75 73 74 61 66 61 20 45 6D   msg33 db 0Dh,0Ah, 'Mustafa Emre KILIN',128,' 20217170039 '
+                72 65 20 4B 49 4C 49 4E 80 20 32 30 
+                32 31 37 31 37 30 30 33 39 20       
+[1031]    1105:                                       n33end:
+[1032]        :                                       
+[1033]        :                                       
+[1034]        :                                       
+[1035]    1105: B0 01                                 mov al, 1
+[1036]    1107: B7 00                                 	mov bh, 0
+[1037]    1109: B3 0F                                 	mov bl, 0000_1111b
+[1038]    110B: B9 20 00                              	mov cx, n38end - offset msg38 ; calculate message size.
+[1039]    110E: B2 02                                 	mov dl, 2
+[1040]    1110: B6 02                                 	mov dh, 2
+[1041]    1112: 0E                                    	push cs
+[1042]    1113: 07                                    	pop es
+[1043]    1114: BD 1D 11                              	mov bp, offset msg38
+[1044]    1117: B4 13                                 	mov ah, 13h
+[1045]    1119: CD 10                                 	int 10h
+[1046]        :                                       	
+[1047]        :                                       	
+[1048]    111B: EB 20                                 jmp n38end
+[1049]    111D: 0D 0A 53 61 6C 69 68 20 4F 6E 75 72   msg38 db 0Dh,0Ah,'Salih Onur KARAKU',158,' 2020717017 '
+                20 4B 41 52 41 4B 55 9E 20 32 30 32 
+                30 37 31 37 30 31 37 20             
+[1050]    113D:                                       n38end:
+[1051]        :                                       
+[1052]        :                                       
+[1053]        :                                       
+[1054]        :                                       
+[1055]        :                                       
+[1056]    113D: E9 B9 FC                              jmp processed
+[1057]        :                                       
+[1058]        :                                       
+[1059]        :                                       
+[1060]        :                                       
+[1061]        :                                       
+[1062]        :                                       
+[1063]        :                                       
+[1064]        :                                       
+ 
+===================================================================================================
+ 
+
+
+
+
+===================================================================================================

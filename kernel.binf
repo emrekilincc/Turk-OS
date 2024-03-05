@@ -1,0 +1,21 @@
+0800 ; load to segment.
+0000 ; load to offset.
+0B ;   AL
+00 ;   AH
+00 ;   BL
+00 ;   BH
+02 ;   CL
+00 ;   CH
+00 ;   DL
+00 ;   DH
+0800 ;   DS
+0800 ;   ES
+7C02 ;   SI
+0000 ;   DI
+0000 ;   BP
+0800 ;   CS
+0000 ;   IP
+07C0 ;   SS
+03FE ;   SP
+
+MEM=
