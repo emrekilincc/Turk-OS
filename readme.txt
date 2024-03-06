@@ -7,4 +7,4 @@ Projeyi TÜRK-OS LOADER dosyasından çalıştırabilrisiniz.
 HAZIRLAYANLAR
 
 Salih Onur KARAKUŞ
-MUstafa Emre KILINÇ
+Mustafa Emre KILINÇ
